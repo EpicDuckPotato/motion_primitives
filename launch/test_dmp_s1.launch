@@ -1,0 +1,5 @@
+<launch>
+  <node name="sim_node" pkg="motion_primitives" type="test_dmp_s1.py" output="screen"/>
+  <arg name="rvizconfig" default="$(find motion_primitives)/rviz/dmp_s1.rviz" />
+  <node name="rviz_node" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
+</launch>
