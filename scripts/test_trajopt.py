@@ -83,6 +83,7 @@ for b, box in enumerate(boxes):
 trajopt = mp.Trajopt(pin_model, pin_geom)
 q_trj = croc.StdVec_VectorX()
 num_q = 100
+# num_q = 3
 q_ref = croc.StdVec_VectorX()
 for i in range(num_q):
   q = pin.neutral(pin_model)
@@ -93,7 +94,7 @@ goal_pos = np.array([0, 1, 1], dtype=np.float64)
 dt = 0.05
 q_cost = 1.0
 v_cost = 1.0
-vdot_cost = dt*dt
+vdot_cost = 1.0
 
 bt = time.perf_counter()
 solved = trajopt.optimize(q_trj, q_ref, qstart, goal_pos, dt, q_cost, v_cost, vdot_cost)
