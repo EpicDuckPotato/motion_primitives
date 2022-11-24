@@ -64,8 +64,6 @@ for b, box in enumerate(boxes):
 
   for idx in link_primitive_idx:
     contact_info.add_contact_pair(idx, box_idx)
-    print('here')
-
 
 trajopt = mp.Trajopt(pin_model, contact_info)
 q_trj = croc.StdVec_VectorX()

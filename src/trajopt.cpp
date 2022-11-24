@@ -163,10 +163,6 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     hessian.setFromTriplets(hessian_triplets.begin(), hessian_triplets.end());
     linearMatrix.setFromTriplets(linearMatrix_triplets.begin(), linearMatrix_triplets.end());
 
-    std::cout << MatrixXd(linearMatrix) << std::endl << std::endl;
-    std::cout << lowerBound << std::endl << std::endl;
-    std::cout << upperBound << std::endl << std::endl;
-
     if(!solver->data()->setHessianMatrix(hessian)) return false;
     if(!solver->data()->setGradient(gradient)) return false;
     if(!solver->data()->setLinearConstraintsMatrix(linearMatrix)) return false;
@@ -184,9 +180,6 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     VectorXd primal = solver->getSolution();
     for (int step = 0; step < steps; ++step) {
       q_trj[step] = pin::integrate(*pin_model, q_trj[step], primal.segment(step*pin_model->nv, pin_model->nv));
-
-      dcol_wrapper.calcDiff(distances, distance_jacobian, q_trj[step]);
-      std::cout << distances.transpose() << std::endl;
     }
 
     // TODO: multiple iterations?
