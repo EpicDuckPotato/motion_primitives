@@ -64,6 +64,10 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     solver->data()->setNumberOfVariables(num_decision_vars);
     solver->data()->setNumberOfConstraints(num_constraints);
 
+    gradient.setZero();
+    linearMatrix_triplets.clear();
+    hessian_triplets.clear();
+
     // Goal constraint
     for (int i = 0; i < 3; ++i) {
       linearMatrix_triplets.push_back(Triplet<double>(i, pin_model->nv*(steps - 1) + i, 1));
@@ -83,7 +87,7 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
       pin::dDifference(*pin_model, q_ref[step], q_trj[step], dqdiff, pin::ArgumentPosition::ARG1);
 
       // Gradient wrt configuration deviation
-      gradient.segment(startrow, pin_model->nv) = q_cost*dqdiff.transpose()*qdiff;
+      gradient.segment(startrow, pin_model->nv) += q_cost*dqdiff.transpose()*qdiff;
       
       // Hessian wrt configuration deviation
       qdiff_hess = dqdiff.transpose()*dqdiff; 
@@ -103,7 +107,7 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
         dv /= dt;
 
         // Gradient
-        gradient.segment(startrow, 2*pin_model->nv) = v_cost*dv.transpose()*(v - v_ref[step]);
+        gradient.segment(startrow, 2*pin_model->nv) += v_cost*dv.transpose()*(v - v_ref[step]);
 
         // Hessian
         v_hess = v_cost*dv.transpose()*dv;
@@ -123,7 +127,7 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
         dvdot.rightCols(pin_model->nv) = dv_next.rightCols(pin_model->nv)/dt;
 
         // Gradient
-        gradient.segment(startrow, 3*pin_model->nv) = vdot_cost*dvdot.transpose()*(vdot - vdot_ref[step]);
+        gradient.segment(startrow, 3*pin_model->nv) += vdot_cost*dvdot.transpose()*(vdot - vdot_ref[step]);
 
         // Hessian
         vdot_hess = vdot_cost*dvdot.transpose()*dvdot;

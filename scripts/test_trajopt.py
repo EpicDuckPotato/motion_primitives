@@ -7,6 +7,9 @@ import motion_primitives.motion_primitives_bindings as mp
 import numpy as np
 import time
 
+np.set_printoptions(linewidth=np.inf)
+np.set_printoptions(suppress=True)
+
 # print(croc.StdVec_VectorX)
 
 rospack = rospkg.RosPack()
@@ -24,12 +27,12 @@ for i in range(num_q):
   q[2] = i/(num_q - 1)
   q_ref.append(q)
 qstart = pin.neutral(pin_model)
-goal_pos = np.ones(3, dtype=np.float64)
+goal_pos = np.array([0, 1, 1], dtype=np.float64)
 dt = 0.05
 q_cost = 1.0
 v_cost = 1.0
-# vdot_cost = 1.0
-vdot_cost = 0.0
+vdot_cost = 1.0
+# vdot_cost = 0.0
 
 bt = time.perf_counter()
 solved = trajopt.optimize(q_trj, q_ref, qstart, goal_pos, dt, q_cost, v_cost, vdot_cost)
