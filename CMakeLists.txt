@@ -1,8 +1,16 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(motion_primitives)
 
+# Removes the lib from the beginning of python libraries we bind through boost python
+function(set_bp_target_properties name)
+  set_target_properties(${name} PROPERTIES
+          PREFIX ""
+          LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/${CATKIN_PACKAGE_PYTHON_DESTINATION}
+          )
+endfunction()
+
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+add_compile_options(-std=c++17)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -14,13 +22,18 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system)
-
+find_package(crocoddyl REQUIRED)
+find_package(PythonLibs REQUIRED)
+find_package(Boost COMPONENTS python3.8 REQUIRED)
+find_package(eigenpy REQUIRED)
+find_package(itp_contact REQUIRED)
+find_package(OpenMP REQUIRED)
+find_package(OsqpEigen REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
 ## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
-# catkin_python_setup()
+catkin_python_setup()
 
 ################################################
 ## Declare ROS messages, services and actions ##
@@ -103,10 +116,10 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES motion_primitives
-#  CATKIN_DEPENDS roscpp rospy std_msgs
-#  DEPENDS system_lib
+  INCLUDE_DIRS include
+  LIBRARIES motion_primitives
+  CATKIN_DEPENDS roscpp rospy std_msgs
+  DEPENDS system_lib
 )
 
 ###########
@@ -116,14 +129,26 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  include/motion_primitives
   ${catkin_INCLUDE_DIRS}
+  ${itp_contact_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIRS}
+  ${PYTHON_INCLUDE_DIRS}
+  /opt/openrobots/include
+  /usr/local/include/osqp
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/motion_primitives.cpp
-# )
+add_library(motion_primitives SHARED
+  src/trajopt.cpp
+)
+target_link_libraries(motion_primitives OsqpEigen::OsqpEigen crocoddyl::crocoddyl pinocchio::pinocchio ${itp_contact_LIBRARIES})
+
+add_library(motion_primitives_bindings SHARED MODULE
+  src/bind.cpp
+)
+target_link_libraries(motion_primitives_bindings motion_primitives ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} eigenpy::eigenpy)
+set_bp_target_properties(motion_primitives_bindings)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -172,18 +197,18 @@ include_directories(
 
 ## Mark libraries for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html
-# install(TARGETS ${PROJECT_NAME}
-#   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-# )
+install(TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
+)
 
 ## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  PATTERN ".svn" EXCLUDE
+)
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 # install(FILES
