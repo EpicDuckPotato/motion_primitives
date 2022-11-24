@@ -1,14 +1,19 @@
 #include "trajopt.h"
 
-Trajopt::Trajopt(boost::shared_ptr<pin::Model> pin_model, boost::shared_ptr<ContactInfo> contact_info) : pin_model(pin_model), contact_info(contact_info) {
+Trajopt::Trajopt(boost::shared_ptr<pin::Model> pin_model, boost::shared_ptr<ContactInfo> contact_info) : pin_model(pin_model), contact_info(contact_info), dcol_wrapper(pin_model, contact_info) {
   solver = boost::make_shared<OsqpEigen::Solver>();
   solver->settings()->setVerbosity(false);
   solver->settings()->setWarmStart(true);
   solver->settings()->setAdaptiveRhoInterval(50);
+
+  distances = VectorXd::Zero(contact_info->get_num_contact_pairs());
+  distance_jacobian = MatrixXd::Zero(contact_info->get_num_contact_pairs(), pin_model->nv);
 }
 
 bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>& q_ref, const Ref<const VectorXd> &qstart, const Ref<const Vector3d> &goal_pos, double dt, double q_cost, double v_cost, double vdot_cost) {
   int steps = q_ref.size();
+
+  int num_contact_pairs = contact_info->get_num_contact_pairs();
 
   q_trj = q_ref;
   q_trj[0] = qstart;
@@ -29,13 +34,13 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
   int num_decision_vars = pin_model->nv*steps;
   int num_constraints = 3 + pin_model->nv + contact_info->get_num_contact_pairs()*steps; // Goal constraint, start constraint, and non-penetration constraints
 
-  VectorXd gradient = VectorXd::Zero(num_decision_vars);
+  VectorXd gradient(num_decision_vars);
   SparseMatrix<double> hessian(num_decision_vars, num_decision_vars);
   SparseMatrix<double> linearMatrix(num_constraints, num_decision_vars);
   vector<Triplet<double>> hessian_triplets;
   vector<Triplet<double>> linearMatrix_triplets;
-  VectorXd lowerBound = VectorXd::Zero(num_constraints);
-  VectorXd upperBound = VectorXd::Zero(num_constraints);
+  VectorXd lowerBound(num_constraints);
+  VectorXd upperBound(num_constraints);
 
   Matrix3d rmat_last;
   VectorXd qdiff = VectorXd::Zero(pin_model->nv);
@@ -67,6 +72,8 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     gradient.setZero();
     linearMatrix_triplets.clear();
     hessian_triplets.clear();
+    lowerBound.setZero();
+    upperBound.setZero();
 
     // Goal constraint
     for (int i = 0; i < 3; ++i) {
@@ -140,10 +147,25 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
 
       v_next = v;
       dv_next = dv;
+
+      // Penetration constraints
+      int cidx = 3 + pin_model->nv + num_contact_pairs*step;
+      dcol_wrapper.calcDiff(distances, distance_jacobian, q_trj[step]);
+      lowerBound.segment(cidx, num_contact_pairs) = -distances;
+      upperBound.segment(cidx, num_contact_pairs).setConstant(10000);
+      for (int i = 0; i < num_contact_pairs; ++i) {
+        for (int j = 0; j < pin_model->nv; ++j) {
+          linearMatrix_triplets.push_back(Triplet<double>(cidx + i, startrow + j, distance_jacobian(i, j)));
+        }
+      }
     }
 
     hessian.setFromTriplets(hessian_triplets.begin(), hessian_triplets.end());
     linearMatrix.setFromTriplets(linearMatrix_triplets.begin(), linearMatrix_triplets.end());
+
+    std::cout << MatrixXd(linearMatrix) << std::endl << std::endl;
+    std::cout << lowerBound << std::endl << std::endl;
+    std::cout << upperBound << std::endl << std::endl;
 
     if(!solver->data()->setHessianMatrix(hessian)) return false;
     if(!solver->data()->setGradient(gradient)) return false;
@@ -162,6 +184,9 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     VectorXd primal = solver->getSolution();
     for (int step = 0; step < steps; ++step) {
       q_trj[step] = pin::integrate(*pin_model, q_trj[step], primal.segment(step*pin_model->nv, pin_model->nv));
+
+      dcol_wrapper.calcDiff(distances, distance_jacobian, q_trj[step]);
+      std::cout << distances.transpose() << std::endl;
     }
 
     // TODO: multiple iterations?

@@ -142,7 +142,7 @@ include_directories(
 add_library(motion_primitives SHARED
   src/trajopt.cpp
 )
-target_link_libraries(motion_primitives OsqpEigen::OsqpEigen crocoddyl::crocoddyl pinocchio::pinocchio ${itp_contact_LIBRARIES})
+target_link_libraries(motion_primitives OsqpEigen::OsqpEigen crocoddyl::crocoddyl pinocchio::pinocchio ${itp_contact_LIBRARIES} OpenMP::OpenMP_CXX)
 
 add_library(motion_primitives_bindings SHARED MODULE
   src/bind.cpp

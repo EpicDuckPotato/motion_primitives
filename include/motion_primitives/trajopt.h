@@ -4,7 +4,7 @@
 #include <pinocchio/algorithm/joint-configuration.hpp>
 #include <Eigen/Dense>
 #include <OsqpEigen/OsqpEigen.h>
-#include "itp_contact/contact_info.h"
+#include "itp_contact/dcol_wrapper.h"
 
 using namespace Eigen;
 using namespace std;
@@ -19,4 +19,8 @@ class Trajopt {
     boost::shared_ptr<pin::Model> pin_model;
     boost::shared_ptr<ContactInfo> contact_info;
     boost::shared_ptr<OsqpEigen::Solver> solver;
+
+    DCOLWrapper dcol_wrapper;
+    VectorXd distances;
+    MatrixXd distance_jacobian;
 };
