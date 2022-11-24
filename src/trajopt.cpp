@@ -175,14 +175,13 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     bool solved = solver->solve();
     if (!solved) {
       cout << "status: " << solver->workspace()->info->status_val << endl;
+      return false;
     }
 
     VectorXd primal = solver->getSolution();
     for (int step = 0; step < steps; ++step) {
-      q_trj[step] = pin::integrate(*pin_model, q_trj[step], primal.segment(step*pin_model->nv, pin_model->nv));
+      q_trj[step] = pin::integrate(*pin_model, q_trj[step], primal.segment(step*pin_model->nv, pin_model->nv)/max_outer);
     }
-
-    // TODO: multiple iterations?
-    return true;
   }
+  return true;
 }
