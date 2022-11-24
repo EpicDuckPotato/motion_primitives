@@ -1,19 +1,38 @@
 #include "trajopt.h"
 
-Trajopt::Trajopt(boost::shared_ptr<pin::Model> pin_model, boost::shared_ptr<ContactInfo> contact_info) : pin_model(pin_model), contact_info(contact_info), dcol_wrapper(pin_model, contact_info) {
+#include <pinocchio/spatial/explog.hpp>
+
+Matrix3d quat_diff_to_rmat(const Ref<const Vector4d>& q0, const Ref<const Vector4d>& q1) {
+  return Quaterniond(q0).toRotationMatrix().transpose()*Quaterniond(q1).toRotationMatrix();
+}
+
+Vector3d log_quat_diff(const Ref<const Vector4d>& q0, const Ref<const Vector4d>& q1) {
+  return pin::log3(quat_diff_to_rmat(q0, q1));
+}
+
+Trajopt::Trajopt(boost::shared_ptr<pin::Model> pin_model, boost::shared_ptr<pin::GeometryModel> pin_geom) : pin_model(pin_model), pin_geom(pin_geom)  {
   solver = boost::make_shared<OsqpEigen::Solver>();
   solver->settings()->setVerbosity(false);
   solver->settings()->setWarmStart(true);
   solver->settings()->setAdaptiveRhoInterval(50);
 
-  distances = VectorXd::Zero(contact_info->get_num_contact_pairs());
-  distance_jacobian = MatrixXd::Zero(contact_info->get_num_contact_pairs(), pin_model->nv);
+  distances = VectorXd::Zero(pin_geom->collisionPairs.size());
+  distance_jacobian = MatrixXd::Zero(pin_geom->collisionPairs.size(), pin_model->nv);
+
+  pin_data = pin::Data(*pin_model);
+  geom_data = pin::GeometryData(*pin_geom);
+
+  for (int i = 0; i < pin_model->njoints; ++i) {
+    joint_jacobians.push_back(MatrixXd::Zero(6, pin_model->nv));
+  }
 }
 
 bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>& q_ref, const Ref<const VectorXd> &qstart, const Ref<const Vector3d> &goal_pos, double dt, double q_cost, double v_cost, double vdot_cost) {
   int steps = q_ref.size();
+  double dt2 = dt*dt;
+  int num_rotary = pin_model->nv - 6;
 
-  int num_contact_pairs = contact_info->get_num_contact_pairs();
+  int num_contact_pairs = pin_geom->collisionPairs.size();
 
   q_trj = q_ref;
   q_trj[0] = qstart;
@@ -24,15 +43,16 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
   vector<VectorXd> vdot_ref(steps - 2);
   for (int step = 0; step < steps - 1; ++step) {
     v_ref[step] = VectorXd::Zero(pin_model->nv);
-    pin::difference(*pin_model, q_ref[step], q_ref[step + 1], v_ref[step]);
-    v_ref[step] /= dt;
+    v_ref[step].head<3>() = (q_ref[step + 1].head<3>() - q_ref[step].head<3>())/dt;
+    v_ref[step].segment<3>(3) = log_quat_diff(q_ref[step].segment<4>(3), q_ref[step + 1].segment<4>(3))/dt;
+    v_ref[step].tail(num_rotary) = (q_ref[step + 1].tail(num_rotary) - q_ref[step].tail(num_rotary))/dt;
   }
   for (int step = 0; step < steps - 2; ++step) {
     vdot_ref[step] = (v_ref[step + 1] - v_ref[step])/dt;
   }
 
   int num_decision_vars = pin_model->nv*steps;
-  int num_constraints = 3 + pin_model->nv + contact_info->get_num_contact_pairs()*steps; // Goal constraint, start constraint, and non-penetration constraints
+  int num_constraints = 3 + pin_model->nv + num_contact_pairs*steps; // Goal constraint, start constraint, and non-penetration constraints
 
   VectorXd gradient(num_decision_vars);
   SparseMatrix<double> hessian(num_decision_vars, num_decision_vars);
@@ -42,21 +62,35 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
   VectorXd lowerBound(num_constraints);
   VectorXd upperBound(num_constraints);
 
-  Matrix3d rmat_last;
+  // q cost stuff
   VectorXd qdiff = VectorXd::Zero(pin_model->nv);
-  MatrixXd dqdiff = MatrixXd::Zero(pin_model->nv, pin_model->nv);
-  MatrixXd qdiff_hess = MatrixXd::Zero(pin_model->nv, pin_model->nv);
+  MatrixXd dqdiff = MatrixXd::Identity(pin_model->nv, pin_model->nv);
+  MatrixXd qdiff_hess = MatrixXd::Identity(pin_model->nv, pin_model->nv);
 
+  // v cost stuff
   VectorXd v = VectorXd::Zero(pin_model->nv);
-  MatrixXd dv = MatrixXd::Zero(pin_model->nv, 2*pin_model->nv);
-  MatrixXd v_hess = MatrixXd::Zero(2*pin_model->nv, 2*pin_model->nv);
+  MatrixXd dv = -MatrixXd::Identity(pin_model->nv, 2*pin_model->nv)/dt;
+  dv.rightCols(pin_model->nv) = MatrixXd::Identity(pin_model->nv, pin_model->nv)/dt;
+  MatrixXd v_hess = dv.transpose()*dv;
 
+  // vdot cost stuff
   VectorXd v_next = VectorXd::Zero(pin_model->nv);
   MatrixXd dv_next = MatrixXd::Zero(pin_model->nv, 2*pin_model->nv);
 
   VectorXd vdot = VectorXd::Zero(pin_model->nv);
-  MatrixXd dvdot = MatrixXd::Zero(pin_model->nv, 3*pin_model->nv);
-  MatrixXd vdot_hess = MatrixXd::Zero(3*pin_model->nv, 3*pin_model->nv);
+  MatrixXd dvdot = MatrixXd::Identity(pin_model->nv, 3*pin_model->nv)/dt2;
+  dvdot.block(0, pin_model->nv, pin_model->nv, pin_model->nv) = -2*MatrixXd::Identity(pin_model->nv, pin_model->nv)/dt2;
+  dvdot.rightCols(pin_model->nv) = MatrixXd::Identity(pin_model->nv, pin_model->nv)/dt2;
+  MatrixXd vdot_hess = dvdot.transpose()*dvdot;
+
+  // FCL stuff
+  Vector3d normal;
+  Vector3d t0;
+  Matrix<double, 3, 6> adj0 = Matrix<double, 3, 6>::Identity();
+  Vector3d t1;
+  Matrix<double, 3, 6> adj1 = Matrix<double, 3, 6>::Identity();
+
+  Matrix3d rmat_diff;
 
   int max_outer = 1;
   for (int outer = 0; outer < max_outer; ++outer) {
@@ -90,8 +124,11 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
       int startcol = startrow;
 
       // Configuration deviation penalty
-      pin::difference(*pin_model, q_ref[step], q_trj[step], qdiff);
-      pin::dDifference(*pin_model, q_ref[step], q_trj[step], dqdiff, pin::ArgumentPosition::ARG1);
+      qdiff.head<3>() = q_trj[step].head<3>() - q_ref[step].head<3>();
+      qdiff.tail(num_rotary) = q_trj[step].tail(num_rotary) - q_ref[step].tail(num_rotary);
+      rmat_diff = quat_diff_to_rmat(q_ref[step].segment<4>(3), q_trj[step].segment<4>(3));
+      qdiff.segment<3>(3) = pin::log3(rmat_diff);
+      pin::Jlog3(rmat_diff, dqdiff.block<3, 3>(3, 3));
 
       // Gradient wrt configuration deviation
       gradient.segment(startrow, pin_model->nv) += q_cost*dqdiff.transpose()*qdiff;
@@ -106,12 +143,13 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
 
       if (step < steps - 1) {
         // Velocity deviation penalty
-        pin::difference(*pin_model, q_trj[step], q_trj[step + 1], v);
-        v /= dt;
-
-        pin::dDifference(*pin_model, q_trj[step], q_trj[step + 1], dv.leftCols(pin_model->nv), pin::ArgumentPosition::ARG0);
-        pin::dDifference(*pin_model, q_trj[step], q_trj[step + 1], dv.rightCols(pin_model->nv), pin::ArgumentPosition::ARG1);
-        dv /= dt;
+        v.head<3>() = (q_trj[step + 1].head<3>() - q_trj[step].head<3>())/dt;
+        v.tail(num_rotary) = (q_trj[step + 1].tail(num_rotary) - q_trj[step].tail(num_rotary))/dt;
+        rmat_diff = quat_diff_to_rmat(q_trj[step].segment<4>(3), q_trj[step + 1].segment<4>(3));
+        v.segment<3>(3) = pin::log3(rmat_diff)/dt;
+        pin::Jlog3(rmat_diff, dv.block<3, 3>(3, pin_model->nv + 3));
+        dv.block<3, 3>(3, pin_model->nv + 3) /= dt;
+        dv.block<3, 3>(3, 3) = -dv.block<3, 3>(3, pin_model->nv + 3)*rmat_diff.transpose();
 
         // Gradient
         gradient.segment(startrow, 2*pin_model->nv) += v_cost*dv.transpose()*(v - v_ref[step]);
@@ -149,13 +187,41 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
       dv_next = dv;
 
       // Penetration constraints
-      int cidx = 3 + pin_model->nv + num_contact_pairs*step;
-      dcol_wrapper.calcDiff(distances, distance_jacobian, q_trj[step]);
-      lowerBound.segment(cidx, num_contact_pairs) = -distances;
-      upperBound.segment(cidx, num_contact_pairs).setConstant(10000);
-      for (int i = 0; i < num_contact_pairs; ++i) {
-        for (int j = 0; j < pin_model->nv; ++j) {
-          linearMatrix_triplets.push_back(Triplet<double>(cidx + i, startrow + j, distance_jacobian(i, j)));
+      if (num_contact_pairs) {
+        int cidx = 3 + pin_model->nv + num_contact_pairs*step;
+        pin::forwardKinematics(*pin_model, pin_data, q_trj[step]);
+        pin::computeJointJacobians(*pin_model, pin_data);
+        for (int j = 0; j < pin_model->njoints; ++j) {
+          pin::getJointJacobian(*pin_model, pin_data, j, pin::ReferenceFrame::LOCAL_WORLD_ALIGNED, joint_jacobians[j]);
+        }
+        pin::computeDistances(*pin_model, pin_data, *pin_geom, geom_data);
+
+        for (int p = 0; p < pin_geom->collisionPairs.size(); ++p) {
+          lowerBound(cidx + p) = -geom_data.distanceResults[p].min_distance;
+          upperBound(cidx + p) = 10000;
+          if (geom_data.distanceResults[p].min_distance < 0) {
+            normal = geom_data.distanceResults[p].normal;
+          } else {
+            normal = geom_data.distanceResults[p].nearest_points[1] - geom_data.distanceResults[p].nearest_points[0];
+          }
+          normal.normalize();
+
+          int jidx0 = pin_geom->geometryObjects[pin_geom->collisionPairs[p].first].parentJoint;
+          t0 = geom_data.distanceResults[p].nearest_points[0] - pin_data.oMi[jidx0].translation();
+          adj0.rightCols<3>() = -pin::skew(t0);
+
+          int jidx1 = pin_geom->geometryObjects[pin_geom->collisionPairs[p].second].parentJoint;
+          t1 = geom_data.distanceResults[p].nearest_points[1] - pin_data.oMi[jidx1].translation();
+          adj1.rightCols<3>() = -pin::skew(t1);
+
+          distance_jacobian.row(p) = normal.transpose()*(adj1*joint_jacobians[jidx1] - adj0*joint_jacobians[jidx0]);
+        }
+
+        distance_jacobian.leftCols<3>() = distance_jacobian.leftCols<3>()*Quaterniond(q_trj[step].segment<4>(3)).toRotationMatrix().transpose();
+        for (int i = 0; i < num_contact_pairs; ++i) {
+          for (int j = 0; j < pin_model->nv; ++j) {
+            linearMatrix_triplets.push_back(Triplet<double>(cidx + i, startrow + j, distance_jacobian(i, j)));
+          }
         }
       }
     }
@@ -179,9 +245,30 @@ bool Trajopt::optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>
     }
 
     VectorXd primal = solver->getSolution();
+
+    /*
+    std::cout << (linearMatrix*primal - lowerBound).minCoeff() << std::endl;
+    std::cout << (linearMatrix*primal - upperBound).maxCoeff() << std::endl;
+    std::cout << 0.5*primal.transpose()*hessian*primal + gradient.transpose()*primal << std::endl;
+    */
+
     for (int step = 0; step < steps; ++step) {
-      q_trj[step] = pin::integrate(*pin_model, q_trj[step], primal.segment(step*pin_model->nv, pin_model->nv)/max_outer);
+      q_trj[step].head<3>() += primal.segment<3>(step*pin_model->nv);
+      q_trj[step].tail(num_rotary) += primal.segment(step*pin_model->nv + 6, num_rotary);
+      Quaterniond quat_plus = Quaterniond(q_trj[step].segment<4>(3))*Quaterniond(pin::exp3(primal.segment<3>(step*pin_model->nv + 3)));
+      q_trj[step](3) = quat_plus.x();
+      q_trj[step](4) = quat_plus.y();
+      q_trj[step](5) = quat_plus.z();
+      q_trj[step](6) = quat_plus.w();
+
+      // primal.segment(step*pin_model->nv + 6, num_rotary).setZero();
     }
+
+    /*
+    std::cout << (linearMatrix*primal - lowerBound).minCoeff() << std::endl;
+    std::cout << (linearMatrix*primal - upperBound).maxCoeff() << std::endl;
+    std::cout << 0.5*primal.transpose()*hessian*primal + gradient.transpose()*primal << std::endl;
+    */
   }
   return true;
 }
