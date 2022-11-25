@@ -15,7 +15,7 @@ namespace pin = pinocchio;
 class Trajopt {
   public:
     Trajopt(boost::shared_ptr<pin::Model> pin_model, boost::shared_ptr<pin::GeometryModel> pin_geom);
-    bool optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>& q_ref, const Ref<const VectorXd> &qstart, const Ref<const Vector3d> &goal_pos, double dt, double q_cost, double v_cost, double vdot_cost);
+    bool optimize(std::vector<VectorXd>& q_trj, const std::vector<VectorXd>& q_ref, const Ref<const VectorXd> &qstart, const Ref<const Vector3d> &goal_pos, double dt, double q_cost, double v_cost, double vdot_cost, int max_outer);
   private:
     boost::shared_ptr<pin::Model> pin_model;
     boost::shared_ptr<pin::GeometryModel> pin_geom;

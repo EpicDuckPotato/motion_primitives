@@ -90,14 +90,15 @@ for i in range(num_q):
   q[2] = i/(num_q - 1)
   q_ref.append(q)
 qstart = pin.neutral(pin_model)
-goal_pos = np.array([0, 1, 1], dtype=np.float64)
+# goal_pos = np.array([0, 1, 1], dtype=np.float64)
+goal_pos = np.array([0, -1, 1], dtype=np.float64)
 dt = 0.05
 q_cost = 1.0
 v_cost = 1.0
 vdot_cost = 1.0
 
 bt = time.perf_counter()
-solved = trajopt.optimize(q_trj, q_ref, qstart, goal_pos, dt, q_cost, v_cost, vdot_cost)
+solved = trajopt.optimize(q_trj, q_ref, qstart, goal_pos, dt, q_cost, v_cost, vdot_cost, 2)
 at = time.perf_counter()
 print(solved)
 '''
@@ -148,9 +149,7 @@ for box in boxes:
 
 rate = rospy.Rate(1/dt)
 for rep in range(100):
-  # for q in q_ref:
   for q in q_trj:
-    print(q)
     if rospy.is_shutdown():
       break
 
