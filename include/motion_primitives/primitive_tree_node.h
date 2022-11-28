@@ -15,7 +15,6 @@ class PrimitiveTreeNode : public Node {
   public:
     PrimitiveTreeNode(double cost, const VectorXd &q, const PrimitiveLibrary &library, const R3Path &r3_path, int path_start, const Vector3d &delta_pos, int id, int parent_id, int generating_primitive) : Node(id, parent_id, cost), q(q), library(library), r3_path(r3_path), path_start(path_start), delta_pos(delta_pos), generating_primitive(generating_primitive) {
       reached_goal = (q.head<3>() - r3_path.back()).norm() < 0.1;
-      quat = Quaterniond(q.segment<4>(3));
     }
 
     virtual bool is_solution_candidate() override {
@@ -32,6 +31,7 @@ class PrimitiveTreeNode : public Node {
         // Transform the primitive's final head position,
         // find the closest point on the path,
         // make that the intermediate goal that we warp to
+        Quaterniond quat = Quaterniond(q.segment<4>(3))*Quaterniond(library[i][0].segment<4>(3)).conjugate();
         double min_dist = 100;
         int min_path_step = 0;
         Vector3d primitive_end = q.head<3>() + quat*library[i].back().head<3>();
@@ -75,7 +75,6 @@ class PrimitiveTreeNode : public Node {
   protected:
     const PrimitiveLibrary &library;
     VectorXd q;
-    Quaterniond quat;
     bool reached_goal;
     const R3Path &r3_path;
     int path_start;

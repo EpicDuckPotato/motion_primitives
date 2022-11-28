@@ -29,7 +29,7 @@ class PrimitiveSequencer {
         const Vector3d &delta_pos = next_node->get_delta_pos();
 
         // Get this node's primitive
-        Quaterniond quat = Quaterniond(q.segment<4>(3));
+        Quaterniond quat = Quaterniond(q.segment<4>(3))*Quaterniond(library[primitive_idx][0].segment<4>(3)).conjugate();
         for (int j = 1; j < library[primitive_idx].size(); ++j) {
           VectorXd q_primitive = library[primitive_idx][j];
           q_primitive.head<3>() = q.head<3>() + quat*q_primitive.head<3>() + j*delta_pos/(library[primitive_idx].size() - 1);
