@@ -141,6 +141,7 @@ include_directories(
 ## Declare a C++ library
 add_library(motion_primitives SHARED
   src/trajopt.cpp
+  src/tree_search.cpp
 )
 target_link_libraries(motion_primitives OsqpEigen::OsqpEigen crocoddyl::crocoddyl pinocchio::pinocchio ${itp_contact_LIBRARIES} OpenMP::OpenMP_CXX)
 

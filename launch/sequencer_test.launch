@@ -1,0 +1,9 @@
+<launch>
+  <node name="trajopt_node" pkg="motion_primitives" type="sequencer_test.py" output="screen"/>
+  <param name="robot_description" textfile="$(find humrs_control)/../urdf/snake.urdf" />
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+    <remap from="joint_states" to="/humrs/fbk/joint_state" />
+  </node>
+  <arg name="rvizconfig" default="$(find motion_primitives)/rviz/trajopt.rviz" />
+  <node name="trajopt_rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
+</launch>
