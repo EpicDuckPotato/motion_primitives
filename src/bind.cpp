@@ -26,7 +26,7 @@ BOOST_PYTHON_MODULE(motion_primitives_bindings) {
 
   bp::register_ptr_to_python<boost::shared_ptr<PrimitiveSequencer>>();
   bp::class_<PrimitiveSequencer>("PrimitiveSequencer",
-      bp::init<const PrimitiveLibrary&>())
+      bp::init<const PrimitiveLibrary&, boost::shared_ptr<pin::Model>, boost::shared_ptr<pin::GeometryModel>>())
       .def("sequence", &PrimitiveSequencer::sequence)
   ;
 }

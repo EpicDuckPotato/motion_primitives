@@ -42,4 +42,4 @@ struct compare_nodes {
   }
 };
 
-void tree_search(vector<boost::shared_ptr<Node>> &solution, const boost::shared_ptr<Node> &root);
+bool tree_search(vector<boost::shared_ptr<Node>> &solution, const boost::shared_ptr<Node> &root);
